@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cross-sell / Upsell Propensity</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--ink:#1b2333;--mute:#6b7488;--blue:#2f6fed;--line:#e3e6ef}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1420;--card:#171d2c;--ink:#e8ecf5;--mute:#93a0b8;--line:#2a3347}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--ink)}
+header{padding:18px 28px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+h1{font-size:18px;margin:0}main{padding:20px 28px;max-width:1280px;margin:auto}
+.tabs button{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:7px 14px;border-radius:20px;margin-right:6px;cursor:pointer}
+.tabs button.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.grid{display:grid;gap:14px}.kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:16px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.kpi b{font-size:22px;display:block}.kpi span{color:var(--mute);font-size:12px}
+.two{grid-template-columns:1fr 1fr}@media(max-width:900px){.two{grid-template-columns:1fr}}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-size:13px}th{color:var(--mute);font-weight:600}
+.badge{padding:2px 9px;border-radius:12px;font-size:12px;font-weight:600}.OK{background:#d9f5e3;color:#116a36}.WARN{background:#fff0cc;color:#8a5a00}.ALERT,.BLOCKED{background:#fde0e0;color:#a31515}
+h3{margin:0 0 10px;font-size:14px}select,textarea,button.act{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:6px}
+textarea{width:100%;height:120px;font-family:ui-monospace,Consolas,monospace;font-size:12px}button.act{background:var(--blue);color:#fff;border:0;cursor:pointer;padding:7px 14px}
+.bar{height:8px;border-radius:4px;background:var(--blue)}.mute{color:var(--mute)}
+</style></head><body>
+<header><h1>Cross-sell / Upsell Propensity &middot; Next-Best-Offer</h1><span class="mute">synthetic data &middot; <a href="/docs">API docs</a></span></header>
+<main>
+<div class="tabs" id="tabs"></div>
+<div class="grid kpis" id="kpis"></div>
+<div class="grid two">
+  <div class="card"><h3>Lift by decile (out-of-time)</h3><canvas id="lift" height="150"></canvas></div>
+  <div class="card"><h3>Model comparison (Gini, higher is better)</h3><canvas id="cmp" height="150"></canvas></div>
+</div>
+<div class="grid two" style="margin-top:14px">
+  <div class="card"><h3>Drift &amp; monitoring <span id="dstat"></span></h3><div id="drift"></div></div>
+  <div class="card"><h3>Score a customer (live API call)</h3>
+    <textarea id="payload"></textarea><p><button class="act" onclick="scoreIt()">POST /score</button> <span id="res" class="mute"></span></p></div>
+</div>
+<div class="card" style="margin-top:14px"><h3>Ranked prospects (propensity &times; revenue potential, eligibility-filtered)
+  &nbsp; <select id="rm" onchange="loadProspects()"><option value="">All RMs</option></select>
+  <select id="best" onchange="loadProspects()"><option value="0">This product</option><option value="1">Next-best-offer per customer (all products)</option></select></h3>
+  <div style="overflow:auto;max-height:420px"><table id="pt"></table></div></div>
+</main>
+<script>
+let prod=null,charts={};const $=id=>document.getElementById(id);
+const j=u=>fetch(u).then(r=>r.ok?r.json():null);const pct=x=>(100*x).toFixed(1)+'%';
+async function init(){
+  const s=await j('/api/summary');if(!s||!s.length){$('kpis').innerHTML='<div class="card">No models yet - run <code>python -m csu.cli run-all</code></div>';return}
+  window.S=s;$('tabs').innerHTML=s.map(p=>`<button id="t_${p.product}" onclick="pick('${p.product}')">${p.label} <span class="badge ${p.status}">${p.status}</span></button>`).join('');
+  const rms=await j('/api/rms');$('rm').innerHTML+=(rms||[]).map(r=>`<option>${r}</option>`).join('');pick(s[0].product)}
+async function pick(p){prod=p;document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.id==='t_'+p));
+  const s=S.find(x=>x.product===p),r=await j('/api/models/'+p);
+  $('kpis').innerHTML=[['Champion',s.champion.replace('_',' ')],['OOT Gini',s.oot_gini.toFixed(3)],['OOT KS',s.oot_ks.toFixed(3)],['OOT AUC',s.oot_auc.toFixed(3)],
+   ['Top-decile lift',s.top10_lift.toFixed(2)+'x'],['Top-20% capture',pct(s.top20_capture)],['Threshold',s.threshold.toFixed(2)]].map(k=>`<div class="card kpi"><b>${k[1]}</b><span>${k[0]}</span></div>`).join('');
+  draw('lift',{type:'bar',data:{labels:r.oot_deciles.map(d=>d.decile),datasets:[{label:'Lift',data:r.oot_deciles.map(d=>d.lift),backgroundColor:'#2f6fed'},
+    {type:'line',label:'Cumulative capture %',data:r.oot_deciles.map(d=>d.capture_rate*100),yAxisID:'y2',borderColor:'#f59e0b'}]},
+    options:{scales:{y:{title:{display:true,text:'lift'}},y2:{position:'right',grid:{drawOnChartArea:false},max:100}}}});
+  draw('cmp',{type:'bar',data:{labels:r.models.map(m=>m.model.replace('_',' ')),datasets:[{label:'Test',data:r.models.map(m=>m.test_gini),backgroundColor:'#93b4f5'},{label:'Out-of-time',data:r.models.map(m=>m.oot_gini),backgroundColor:'#2f6fed'}]}});
+  const d=await j('/api/drift'),m=d&&d.models.find(x=>x.product===p);
+  if(m){$('dstat').innerHTML=`<span class="badge ${m.status}">${m.status}</span>`;const mx=Math.max(.3,...Object.values(m.csi||{0:0}));
+   $('drift').innerHTML=`<p>Score PSI <b>${m.score_psi??'-'}</b> &middot; recent Gini ${m.recent_gini??'-'} &middot; retrain: <b>${m.retrain_required}</b> ${(m.reasons||[]).join('; ')}
+    &middot; <a href="/api/evidently/${p}" target="_blank">Evidently report</a></p><table>`+Object.entries(m.csi||{}).map(([k,v])=>`<tr><td>${k}</td><td style="width:45%"><div class="bar" style="width:${100*v/mx}%;background:${v>=.25?'#d33':v>=.1?'#e6a700':'#2f6fed'}"></div></td><td>${v}</td></tr>`).join('')+'</table><p class="mute">CSI per feature (0.10 warn, 0.25 alert)</p>'}
+  const ex=await j('/api/example/'+p);$('payload').value=JSON.stringify({product:p,features:ex},null,1);loadProspects()}
+function draw(id,cfg){if(charts[id])charts[id].destroy();charts[id]=new Chart($(id),cfg)}
+async function loadProspects(){const q=new URLSearchParams({limit:100,rm_id:$('rm').value});if($('best').value==='1')q.set('best_only','true');else q.set('product',prod);
+  const rows=await j('/api/prospects?'+q)||[];$('pt').innerHTML='<tr><th>Customer</th><th>RM</th><th>Offer</th><th>Propensity</th><th>Decile</th><th>Revenue pot.</th><th>Expected value</th><th>Contact</th></tr>'+
+  rows.map(r=>`<tr><td>${r.customer_number}</td><td>${r.rm_id}</td><td>${r.label}</td><td>${pct(r.propensity)}</td><td>${r.decile}</td><td>${r.revenue_potential.toLocaleString()}</td><td><b>${r.expected_value.toLocaleString()}</b></td><td>${r.contact?'yes':''}</td></tr>`).join('')}
+async function scoreIt(){const r=await fetch('/score',{method:'POST',headers:{'Content-Type':'application/json'},body:$('payload').value});const x=await r.json();
+  $('res').textContent=r.ok?`propensity ${pct(x.propensity)} | decile ${x.decile} | contact: ${x.contact} (${x.model})`:JSON.stringify(x)}
+init();
+</script></body></html>

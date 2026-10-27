@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: propensity-model
+    runtime: docker
+    plan: free
+    healthCheckPath: /health

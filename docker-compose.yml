@@ -1,0 +1,29 @@
+# docker compose up --build      (Docker Desktop on Windows)
+#   Airflow  http://localhost:8080   (login: admin, password is printed in `docker compose logs airflow`)
+#   MLflow   http://localhost:5000
+#   API/UI   http://localhost:8000
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////mlflow/mlflow.db --default-artifact-root mlflow-artifacts:/ --artifacts-destination /mlflow/artifacts --serve-artifacts
+    volumes: ["mlflow-data:/mlflow"]
+    ports: ["5000:5000"]
+  airflow:
+    build: {context: ., dockerfile: docker/Dockerfile.airflow}
+    command: standalone
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/project/airflow/dags
+      CSU_HOME: /opt/project
+      PYTHONPATH: /opt/project
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes: ["./:/opt/project"]
+    ports: ["8080:8080"]
+    depends_on: [mlflow]
+  api:
+    build: .
+    command: sh -c "uvicorn api.main:app --host 0.0.0.0 --port 8000"
+    volumes: ["./data:/home/user/app/data", "./models:/home/user/app/models", "./reports:/home/user/app/reports"]
+    ports: ["8000:8000"]
+volumes:
+  mlflow-data:

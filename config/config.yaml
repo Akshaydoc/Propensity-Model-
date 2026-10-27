@@ -1,0 +1,48 @@
+# Central config: windows, targets, split, WOE rules, models, monitoring thresholds
+seed: 42
+data:
+  n_customers: 3000
+  start_ym: 202301
+  n_months: 30            # 202301 .. 202506
+paths:
+  data: data
+  models: models
+  reports: reports
+mlflow:
+  tracking_db: mlflow.db
+  experiment: cross_sell_upsell
+windows:
+  obs: 6                  # OW1..OW6 (OW1 = observation month)
+  perf: 3                 # PW1..PW3 (next 3 months)
+target:
+  mode: cross_sell        # cross_sell | upsell
+  min_lor_months: 7
+  upsell_growth: 0.20     # upsell = balance in PW3 >= 1.2 x balance in OW1
+split:
+  first_obs_ym: 202306
+  train_end_ym: 202409    # dev (train/test) observation months
+  oot_start_ym: 202412    # 3-month gap so performance windows never overlap
+  test_size: 0.30
+  random_state: 43
+woe:
+  max_bins: 10
+  top_categories: 12
+  iv_min: 0.02            # real IV cut-off (the old pipeline had it switched off)
+  iv_max: 0.60            # suspiciously strong -> likely leakage, dropped
+  corr_max: 0.85
+  max_features: 12
+models: [logistic_regression, random_forest, gradient_boosting, ada_boost, mlp, naive_bayes]
+products:
+  casa:         {label: "Current & Savings", prefix: CASA,  types: ["Current Accounts", "Savings Account", "Call Accounts", "Margin Accounts"]}
+  term_loan:    {label: "Term Loan",         prefix: LOAN,  types: ["Business Loans", "Term Loans", "Asset Finance"]}
+  funded_trade: {label: "Funded Trade",      prefix: TRADE, types: ["Bills Discounted", "Trust Receipts"]}
+  credit_card:  {label: "Credit Card",       prefix: CC,    types: ["Corporate Cards"]}
+exclusions: [Excl_A, Excl_B, Excl_C, Excl_D]
+monitoring:
+  psi_warn: 0.10
+  psi_alert: 0.25
+  csi_alert: 0.25
+  ks_alpha: 0.01
+  min_alert_features: 3
+  gini_drop_alert: 0.10
+  max_null_rate: 0.30
